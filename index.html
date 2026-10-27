@@ -1,0 +1,1452 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Dark Maze</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font-family: system-ui, sans-serif; color: #9fe8ff; }
+  canvas { display: block; touch-action: none; }
+  .screen {
+    position: fixed; inset: 0; z-index: 5; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px; text-align: center;
+    padding: 24px; background: rgba(0, 0, 0, .84); overflow-y: auto;
+  }
+  .screen h1, .screen h2 { margin: 0; font-weight: 300; letter-spacing: .4em; text-indent: .4em; }
+  .screen h1 { font-size: 2rem; }
+  .screen h2 { font-size: 2.4rem; }
+  .screen p { margin: 0; max-width: 36rem; line-height: 1.55; color: #6fb7cc; font-size: .95rem; }
+  .screen b { color: #9fe8ff; font-weight: 600; }
+  #end { display: none; z-index: 6; }
+  #endTitle.dead { color: #ff4d6d; }
+  #endTitle.win { color: #ffd60a; }
+  .btn {
+    margin-top: 6px; padding: 12px 28px; font: inherit; letter-spacing: .2em; color: #9fe8ff;
+    background: transparent; border: 1px solid #4cc9f0; border-radius: 4px; cursor: pointer;
+  }
+  .btn:hover:not(:disabled) { background: rgba(76, 201, 240, .15); }
+  .btn:disabled { opacity: .45; cursor: default; }
+  #btns { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+  #diag {
+    margin: 10px 0 0; max-width: 36rem; text-align: left; white-space: pre-wrap; word-break: break-word;
+    font: 11px/1.45 ui-monospace, Menlo, Consolas, monospace; color: #3f7f93;
+  }
+  #hud {
+    position: fixed; left: 16px; top: 14px; z-index: 4; pointer-events: none; display: none;
+    font-size: 13px; letter-spacing: .14em; text-shadow: 0 0 8px #0aa;
+  }
+  #stam {
+    position: fixed; left: 16px; top: 38px; width: 120px; height: 5px; z-index: 4; pointer-events: none;
+    display: none; border: 1px solid #2a6f85;
+  }
+  #stamBar { display: block; height: 100%; width: 100%; background: #4cc9f0; }
+  #stam.low #stamBar { background: #ff4d6d; }
+  #danger {
+    position: fixed; inset: 0; z-index: 2; pointer-events: none; opacity: 0;
+    background: radial-gradient(ellipse at center, rgba(0,0,0,0) 40%, rgba(255, 30, 60, .6) 100%);
+  }
+  #radar { position: fixed; right: 16px; top: 78px; width: 112px; height: 112px; z-index: 4; pointer-events: none; display: none; }
+  #genBar { position: fixed; left: 16px; top: 50px; width: 120px; height: 5px; z-index: 4; pointer-events: none; display: none; border: 1px solid #2a6f85; }
+  #genFill { display: block; height: 100%; width: 0%; background: #39ff88; }
+  #flash {
+    position: fixed; inset: 0; z-index: 3; pointer-events: none; opacity: 0;
+    background: radial-gradient(ellipse at center, rgba(255, 60, 80, .45) 0%, rgba(255, 20, 40, .9) 100%);
+  }
+  #toast {
+    position: fixed; left: 50%; bottom: 14%; transform: translateX(-50%); z-index: 4; width: 90%;
+    text-align: center; pointer-events: none; letter-spacing: .2em; color: #ffd60a; opacity: 0;
+    transition: opacity .4s; text-shadow: 0 0 10px #a80; font-size: 13px;
+  }
+  #touchUI { position: fixed; inset: 0; z-index: 3; display: none; touch-action: none; -webkit-user-select: none; user-select: none; }
+  .tbtn {
+    position: absolute; width: 104px; height: 104px; border-radius: 50%; box-sizing: border-box;
+    border: 2px solid #4cc9f0; color: #9fe8ff; background: rgba(76, 201, 240, .14);
+    display: flex; align-items: center; justify-content: center; text-align: center;
+    font-size: 13px; letter-spacing: .14em;
+  }
+  .tbtn.cool { opacity: .35; }
+  .tbtn.tsmall { width: 56px; height: 56px; font-size: 10px; letter-spacing: .08em; }
+  .tbtn.tmid { width: 80px; height: 80px; font-size: 11px; letter-spacing: .1em; }
+  .tbtn.on { border-color: #ffd60a; color: #ffd60a; background: rgba(255, 214, 10, .22); }
+  #joyRing, #joyKnob { position: absolute; border-radius: 50%; display: none; pointer-events: none; }
+  #joyRing { width: 120px; height: 120px; margin: -60px 0 0 -60px; border: 2px solid rgba(76, 201, 240, .45); }
+  #joyKnob { width: 48px; height: 48px; margin: -24px 0 0 -24px; background: rgba(76, 201, 240, .4); }
+</style>
+<script>
+  // Classic script: still runs if the game module fails, so problems show up on the page.
+  window.diag = function (t) { var el = document.getElementById('diag'); if (el) el.textContent += t + '\n'; };
+  window.addEventListener('error', function (e) { window.diag('ERROR: ' + e.message); });
+  window.addEventListener('unhandledrejection', function (e) {
+    window.diag('ERROR: ' + ((e.reason && e.reason.message) || e.reason));
+  });
+  setTimeout(function () {
+    if (!window.__gameLoaded) window.diag('The game script never started. Is this device online? three.js loads from a CDN.');
+  }, 6000);
+</script>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<div id="card" class="screen">
+  <h1>DARK MAZE</h1>
+  <p>You are in a pitch-black maze, and something is hunting you. Send out a <b>scan</b> and it paints everything
+     around you, in every direction at once. The dots <b>stay</b> and slowly dim, so you build a map as you go.</p>
+  <p>Every scan is <b>loud</b>: the monster hears it and heads for the spot you scanned from. It only shows up for a few
+     seconds when your scan hits it, so listen for the heartbeat. <b>Sprinting</b> is fast but tiring, and the monster
+     notices you from farther away while you do it. The <b>gold pillar</b> is your way out, but it has no power: find and start the <b>generator</b> first.</p>
+  <p><b>Crouching</b> is slow and quiet: if the monster can't <i>see</i> you (a corner or wall is in the way) it stops
+     and waits. In a straight line of sight it keeps coming, and a scan still calls it. Every <b>10 seconds</b> it
+     shows itself for a moment, wherever it is, even through walls. You won't enjoy looking at it.</p>
+  <p>The <b>generator</b> shows up <b>orange</b> on a scan. Stand next to it for about a second to start it. It is loud, and
+     the monster will come for it. The <b>radar</b> (on your left hand in VR, in the corner on phone and desktop)
+     shows how far away your goal is: the generator first, then the exit.</p>
+  <p><b>VR:</b> trigger = scan &nbsp;·&nbsp; left stick = move &nbsp;·&nbsp; click the stick = sprint &nbsp;·&nbsp; right stick = snap turn &nbsp;·&nbsp; A/X or B/Y (or physically crouch) = crouch<br>
+     <b>Phone:</b> left side = move, drag right side = look, SCAN button, SPRINT and CROUCH buttons (tap on / off)<br>
+     <b>Desktop:</b> WASD move &nbsp;·&nbsp; Shift sprint &nbsp;·&nbsp; hold C or Ctrl (or tap X) crouch &nbsp;·&nbsp; mouse look &nbsp;·&nbsp; click or Space = scan &nbsp;·&nbsp; Esc = menu</p>
+  <div id="btns">
+    <button id="playTouch" class="btn">PLAY ON PHONE</button>
+    <button id="playDesk" class="btn">PLAY ON DESKTOP</button>
+    <button id="enterVR" class="btn" disabled>CHECKING VR...</button>
+  </div>
+  <pre id="diag"></pre>
+</div>
+<div id="end" class="screen">
+  <h2 id="endTitle"></h2>
+  <p id="endSub"></p>
+  <button id="endBtn" class="btn">CONTINUE</button>
+</div>
+<div id="danger"></div>
+<div id="flash"></div>
+<div id="hud"></div>
+<div id="stam"><i id="stamBar"></i></div>
+<div id="genBar"><i id="genFill"></i></div>
+<canvas id="radar" width="256" height="256"></canvas>
+<div id="toast"></div>
+<div id="touchUI">
+  <div id="joyRing"></div><div id="joyKnob"></div>
+  <div class="tbtn" id="tScan" data-ctl="scan" style="right:24px; bottom:34px">SCAN</div>
+  <div class="tbtn tmid" id="tSprint" data-ctl="sprint" style="right:36px; bottom:154px">SPRINT</div>
+  <div class="tbtn tmid" id="tCrouch" data-ctl="crouch" style="right:140px; bottom:70px">CROUCH</div>
+  <div class="tbtn tsmall" data-ctl="menu" style="right:16px; top:14px">MENU</div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+window.__gameLoaded = true;
+
+/* ================= settings ================= */
+const TAU = Math.PI * 2;
+const COARSE = !!(window.matchMedia && matchMedia('(pointer: coarse)').matches);
+const T = 2.0;              // size of one maze tile in metres (corridors are one tile wide)
+const H = 2.6;              // wall height
+const EYE = 1.6;            // eye height for desktop / phone
+const RANGE = 14;           // how far a scan reaches
+const LIFE = 5.0;           // seconds a scanned dot takes to dim from full brightness to its resting glow (dots never disappear)
+const MON_LIFE = 3.5;       // the monster's dots do disappear, otherwise you'd see where it used to be
+const SOUND = 18;           // speed of the scan wave in m/s (dots appear as the wave reaches them)
+const COOLDOWN = 2.0;       // seconds between scans
+const MAX_POINTS = COARSE ? 320000 : 700000;   // ring buffer: only when it is full do the oldest dots get overwritten
+const RAYS = COARSE ? 9000 : 14000;
+const SENSE = 5;            // the monster notices you on its own within this many tiles
+const SPRINT_SENSE = 3;     // extra tiles it can notice you from while you sprint
+const SPRINT_MULT = 1.6;    // sprint speed multiplier
+const SPRINT_DRAIN = 3.0;   // seconds of sprinting from a full bar
+const SPRINT_REGEN = 5.0;   // seconds to refill from empty while not sprinting
+const CATCH = 0.85;         // metres
+const PR = 0.3;             // player collision radius
+const CROUCH_EYE = 0.9;     // eye height while crouched (desktop / phone)
+const CROUCH_SPEED = 0.5;   // movement speed multiplier while crouched (no sprinting)
+const CROUCH_FREEZE = 1.0;  // seconds a crouched player must be out of its sight before the monster stops
+const VR_CROUCH_Y = 1.15;   // VR: a head lower than this (metres above the floor) counts as crouching
+const REVEAL_EVERY = 10;    // the monster shows itself on its own this often (seconds)
+const REVEAL_LIFE = 1.0;    // ...for this long
+const REVEAL_NEAR = 6;      // closer than this (metres) the reveal also flashes the screen and shakes the camera
+const SHAKE_TIME = 0.45;
+const GEN_TIME = 1.0;       // seconds standing next to the generator to start it
+const GEN_RANGE = 1.4;      // how close you must be (metres)
+const RADAR_RANGE = 40;     // the radar's outer ring (metres); farther goals pin to the edge
+const RADAR_SWEEP = 3.0;    // seconds per radar sweep
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const hex = (h) => [(h >> 16 & 255) / 255, (h >> 8 & 255) / 255, (h & 255) / 255];
+
+const K = { NONE: 0, WALLX: 1, WALLZ: 2, FLOOR: 3, CEIL: 4, PILLAR: 5, EXITFLOOR: 6, MON: 7, GEN: 8, GENON: 9 };
+const KCOL = [null, hex(0x4cc9f0), hex(0x7b8cff), hex(0x4361ee), hex(0x2ec4b6), hex(0xffd60a), hex(0xffd60a), hex(0xff2a44), hex(0xff9f1c), hex(0x39ff88)];
+const KDIM = [0, 1, 1, 0.9, 0.55, 1.2, 1, 1.3, 1.2, 1.2];
+
+/* ================= renderer / scene ================= */
+const renderer = new THREE.WebGLRenderer({ antialias: !COARSE });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+document.body.appendChild(renderer.domElement);
+const canvasEl = renderer.domElement;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
+const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.02, 60);
+camera.position.set(0, EYE, 0);
+const rig = new THREE.Group();            // the "player": move/turn this, not the camera
+rig.add(camera);
+scene.add(rig);
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+/* ================= the scan dots (one GPU point cloud, ring buffer) ================= */
+const pos = new Float32Array(MAX_POINTS * 3);
+const col = new Uint8Array(MAX_POINTS * 3);
+const birth = new Float32Array(MAX_POINTS).fill(-1e9);
+const lifeArr = new Float32Array(MAX_POINTS).fill(-1);   // -1 = permanent, otherwise seconds until the dot disappears
+const geometry = new THREE.BufferGeometry();
+const posAttr = new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage);
+const colAttr = new THREE.BufferAttribute(col, 3, true).setUsage(THREE.DynamicDrawUsage);
+const birthAttr = new THREE.BufferAttribute(birth, 1).setUsage(THREE.DynamicDrawUsage);
+const lifeAttr = new THREE.BufferAttribute(lifeArr, 1).setUsage(THREE.DynamicDrawUsage);
+geometry.setAttribute('position', posAttr);
+geometry.setAttribute('aColor', colAttr);
+geometry.setAttribute('aBirth', birthAttr);
+geometry.setAttribute('aLife', lifeAttr);
+geometry.setDrawRange(0, 0);
+
+const uniforms = { uTime: { value: 0 }, uSize: { value: 0.02 }, uHalfH: { value: 540 }, uLife: { value: LIFE } };
+const pointMat = new THREE.ShaderMaterial({
+  uniforms,
+  vertexShader: `
+    uniform float uTime; uniform float uSize; uniform float uHalfH; uniform float uLife;
+    attribute vec3 aColor; attribute float aBirth; attribute float aLife;
+    varying vec3 vColor; varying float vGlow;
+    void main() {
+      float age = uTime - aBirth;
+      // hidden until the scan wave reaches it, and (only for dots with a lifetime, like the monster's) after it expires
+      if (age < 0.0 || (aLife >= 0.0 && age > aLife)) {
+        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+        gl_PointSize = 0.0;
+        vColor = vec3(0.0); vGlow = 0.0;
+        return;
+      }
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      gl_Position = projectionMatrix * mv;
+      float fade = aLife < 0.0
+        ? 0.5 + 0.5 * (1.0 - smoothstep(0.0, uLife, age))                // permanent: dims to half brightness and stays
+        : 1.0 - smoothstep(aLife * 0.3, aLife, age);                      // temporary: fades out completely
+      vGlow = exp(-age * 5.0);
+      float s = uSize * projectionMatrix[1][1] * uHalfH / max(-mv.z, 0.05);
+      gl_PointSize = clamp(s * (0.55 + 0.45 * fade) * (1.0 + vGlow * 0.9), 1.5, 11.0);
+      vColor = aColor * fade;
+    }`,
+  fragmentShader: `
+    varying vec3 vColor; varying float vGlow;
+    void main() {
+      vec2 c = gl_PointCoord - 0.5;
+      if (dot(c, c) > 0.25) discard;
+      gl_FragColor = vec4(mix(vColor, vec3(1.0), clamp(vGlow, 0.0, 1.0) * 0.8), 1.0);
+    }`,
+});
+const points = new THREE.Points(geometry, pointMat);
+points.frustumCulled = false;
+const _sz = new THREE.Vector2();
+points.onBeforeRender = (r, s, cam) => {
+  // point sizes need the real pixel height: the eye viewport in VR, the canvas on desktop
+  const h = cam && cam.viewport ? cam.viewport.w : (r.getDrawingBufferSize(_sz), _sz.y);
+  uniforms.uHalfH.value = h * 0.5;
+};
+scene.add(points);
+
+let head = 0, count = 0, dirtyStart = 0, dirtyN = 0, fullDirty = false, time = 0;
+
+function addPoint(x, y, z, c, k, bt, life) {
+  const i = head;
+  pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z;
+  col[i * 3] = Math.min(255, c[0] * 255 * k);
+  col[i * 3 + 1] = Math.min(255, c[1] * 255 * k);
+  col[i * 3 + 2] = Math.min(255, c[2] * 255 * k);
+  birth[i] = bt;
+  lifeArr[i] = life === undefined ? -1 : life;
+  if (dirtyN === 0) dirtyStart = i;
+  dirtyN++;
+  head = (head + 1) % MAX_POINTS;
+  if (count < MAX_POINTS) count++;
+}
+
+function flushPoints() {
+  if (dirtyN === 0 && !fullDirty) return;
+  let ranges;
+  if (fullDirty || dirtyN >= MAX_POINTS) ranges = [[0, MAX_POINTS]];
+  else if (dirtyStart + dirtyN <= MAX_POINTS) ranges = [[dirtyStart, dirtyN]];
+  else ranges = [[dirtyStart, MAX_POINTS - dirtyStart], [0, dirtyStart + dirtyN - MAX_POINTS]];
+  for (const a of [posAttr, colAttr, birthAttr, lifeAttr]) {
+    if (a.clearUpdateRanges && a.addUpdateRange) {
+      a.clearUpdateRanges();
+      for (const [s, n] of ranges) a.addUpdateRange(s * a.itemSize, n * a.itemSize);
+    }
+    a.needsUpdate = true;
+  }
+  geometry.setDrawRange(0, count);
+  dirtyN = 0; fullDirty = false;
+}
+
+function clearPoints() {
+  birth.fill(-1e9);
+  lifeArr.fill(-1);
+  head = 0; count = 0; dirtyN = 0; fullDirty = true;
+}
+
+/* ================= maze ================= */
+let N = 0, grid = null;
+let exitTile = [1, 1], exitX = 0, exitZ = 0;
+let startTile = [1, 1];
+const D4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+const rand = (n) => Math.floor(Math.random() * n);
+
+function genMaze(c) {                       // c x c cells, drawn on a (2c+1) x (2c+1) tile grid
+  const n = 2 * c + 1;
+  const g = new Uint8Array(n * n).fill(1);  // 1 = wall
+  const open = (i, j) => { g[j * n + i] = 0; };
+  const seen = new Uint8Array(c * c);
+  const stack = [[0, 0]];
+  seen[0] = 1; open(1, 1);
+  while (stack.length) {                    // depth-first "recursive backtracker"
+    const [cx, cz] = stack[stack.length - 1];
+    const nb = [];
+    for (const [dx, dz] of D4) {
+      const nx = cx + dx, nz = cz + dz;
+      if (nx >= 0 && nz >= 0 && nx < c && nz < c && !seen[nz * c + nx]) nb.push([nx, nz, dx, dz]);
+    }
+    if (!nb.length) { stack.pop(); continue; }
+    const [nx, nz, dx, dz] = nb[rand(nb.length)];
+    seen[nz * c + nx] = 1;
+    open(2 * cx + 1 + dx, 2 * cz + 1 + dz);
+    open(2 * nx + 1, 2 * nz + 1);
+    stack.push([nx, nz]);
+  }
+  let extra = Math.max(2, Math.floor(c * c * 0.12));      // knock a few walls out so there are loops
+  for (let tries = 0; tries < extra * 12 && extra > 0; tries++) {
+    const i = 1 + rand(n - 2), j = 1 + rand(n - 2);
+    if (((i + j) & 1) === 1 && g[j * n + i] === 1) { open(i, j); extra--; }
+  }
+  return { n, g };
+}
+
+const isWall = (i, j) => i < 0 || j < 0 || i >= N || j >= N || grid[j * N + i] === 1;
+
+function bfsAll(si, sj) {
+  const dist = new Int16Array(N * N).fill(-1);
+  const q = [si + sj * N];
+  dist[q[0]] = 0;
+  for (let h = 0; h < q.length; h++) {
+    const cc = q[h], ci = cc % N, cj = (cc / N) | 0;
+    for (const [di, dj] of D4) {
+      const ni = ci + di, nj = cj + dj;
+      if (ni < 0 || nj < 0 || ni >= N || nj >= N) continue;
+      const nc = ni + nj * N;
+      if (grid[nc] || dist[nc] >= 0) continue;
+      dist[nc] = dist[cc] + 1;
+      q.push(nc);
+    }
+  }
+  return dist;
+}
+
+function bfsPath(si, sj, ti, tj) {          // list of tiles from the one after the start up to the target
+  if (si === ti && sj === tj) return [];
+  if (isWall(ti, tj)) return [];
+  const prev = new Int32Array(N * N).fill(-1);
+  const q = [si + sj * N];
+  prev[q[0]] = q[0];
+  const goal = ti + tj * N;
+  for (let h = 0; h < q.length && prev[goal] < 0; h++) {
+    const cc = q[h], ci = cc % N, cj = (cc / N) | 0;
+    for (const [di, dj] of D4) {
+      const ni = ci + di, nj = cj + dj;
+      if (ni < 0 || nj < 0 || ni >= N || nj >= N) continue;
+      const nc = ni + nj * N;
+      if (grid[nc] || prev[nc] >= 0) continue;
+      prev[nc] = cc;
+      q.push(nc);
+    }
+  }
+  if (prev[goal] < 0) return [];
+  const path = [];
+  for (let cc = goal; cc !== q[0]; cc = prev[cc]) path.push([cc % N, (cc / N) | 0]);
+  return path.reverse();
+}
+
+/* ---- ray casting against the maze: a 2D grid walk plus floor / ceiling planes ---- */
+const hit = { t: 0, kind: 0 };
+
+function sphereT(ox, oy, oz, dx, dy, dz, cx, cy, cz, r, tMax) {
+  const lx = ox - cx, ly = oy - cy, lz = oz - cz;
+  const b = lx * dx + ly * dy + lz * dz;
+  const c = lx * lx + ly * ly + lz * lz - r * r;
+  const disc = b * b - c;
+  if (disc < 0) return Infinity;
+  const t = -b - Math.sqrt(disc);
+  return t > 0 && t < tMax ? t : Infinity;
+}
+
+function castRay(ox, oy, oz, dx, dy, dz, maxT) {
+  let tPlane = maxT, kPlane = K.NONE;
+  if (dy < -1e-6) { const t = -oy / dy; if (t < tPlane) { tPlane = t; kPlane = K.FLOOR; } }
+  else if (dy > 1e-6) { const t = (H - oy) / dy; if (t < tPlane) { tPlane = t; kPlane = K.CEIL; } }
+
+  let ix = Math.floor(ox / T), iz = Math.floor(oz / T);
+  const sx = dx > 0 ? 1 : -1, sz = dz > 0 ? 1 : -1;
+  const tdx = dx !== 0 ? Math.abs(T / dx) : Infinity;
+  const tdz = dz !== 0 ? Math.abs(T / dz) : Infinity;
+  let tmx = dx > 0 ? ((ix + 1) * T - ox) / dx : dx < 0 ? (ox - ix * T) / -dx : Infinity;
+  let tmz = dz > 0 ? ((iz + 1) * T - oz) / dz : dz < 0 ? (oz - iz * T) / -dz : Infinity;
+  let tWall = Infinity, kWall = K.NONE;
+  for (;;) {
+    if (tmx < tmz) {
+      if (tmx > tPlane) break;
+      ix += sx; const t = tmx; tmx += tdx;
+      if (isWall(ix, iz)) { tWall = t; kWall = K.WALLX; break; }
+    } else {
+      if (tmz > tPlane) break;
+      iz += sz; const t = tmz; tmz += tdz;
+      if (isWall(ix, iz)) { tWall = t; kWall = K.WALLZ; break; }
+    }
+  }
+  let bestT = Infinity, bestK = K.NONE;
+  if (kWall !== K.NONE) { bestT = tWall; bestK = kWall; }
+  else if (kPlane !== K.NONE) {
+    bestT = tPlane; bestK = kPlane;
+    if (kPlane === K.FLOOR) {
+      const fx = ox + dx * tPlane, fz = oz + dz * tPlane;
+      if (Math.floor(fx / T) === exitTile[0] && Math.floor(fz / T) === exitTile[1]) bestK = K.EXITFLOOR;
+    }
+  }
+  // the gold exit pillar: a vertical cylinder
+  {
+    const a = dx * dx + dz * dz;
+    if (a > 1e-9) {
+      const ex = ox - exitX, ez = oz - exitZ;
+      const b = 2 * (ex * dx + ez * dz), c = ex * ex + ez * ez - 0.35 * 0.35;
+      const disc = b * b - 4 * a * c;
+      if (disc > 0) {
+        const t = (-b - Math.sqrt(disc)) / (2 * a), y = oy + dy * t;
+        if (t > 0 && t < bestT && t < maxT && y >= 0 && y <= H) { bestT = t; bestK = K.PILLAR; }
+      }
+    }
+  }
+  // the generator: a box (slab test)
+  {
+    const o = [ox - genX, oy, oz - genZ], d = [dx, dy, dz], lo = [-0.45, 0, -0.45], hi = [0.45, 1.1, 0.45];
+    let t0 = 0, t1 = Math.min(bestT, maxT), okb = true;
+    for (let a = 0; a < 3 && okb; a++) {
+      if (Math.abs(d[a]) < 1e-9) { if (o[a] < lo[a] || o[a] > hi[a]) okb = false; }
+      else {
+        let ta = (lo[a] - o[a]) / d[a], tb = (hi[a] - o[a]) / d[a];
+        if (ta > tb) { const tmp = ta; ta = tb; tb = tmp; }
+        if (ta > t0) t0 = ta;
+        if (tb < t1) t1 = tb;
+        if (t0 > t1) okb = false;
+      }
+    }
+    if (okb && t0 > 0 && t0 < bestT) { bestT = t0; bestK = powered ? K.GENON : K.GEN; }
+  }
+  // the monster: a body and a head
+  if (monster && state === 'play') {
+    const bob = Math.sin(time * 6) * 0.04;
+    const t1 = sphereT(ox, oy, oz, dx, dy, dz, monster.x, 0.95 + bob, monster.z, 0.55, Math.min(bestT, maxT));
+    const t2 = sphereT(ox, oy, oz, dx, dy, dz, monster.x, 1.75 + bob, monster.z, 0.32, Math.min(bestT, maxT));
+    const t = Math.min(t1, t2);
+    if (t < bestT) { bestT = t; bestK = K.MON; }
+  }
+  hit.t = bestT; hit.kind = bestK;
+  return bestK !== K.NONE && bestT < maxT;
+}
+
+/* ================= the creature (a point-cloud silhouette, built once) ================= */
+const MCOL = [KCOL[K.MON], [1, 1, 1], [1, 0.92, 0.75]];       // body, eyes, teeth
+const MONSTER = (() => {
+  const out = [], R = Math.random;
+  const ell = (cx, cy, cz, rx, ry, rz, n, c, k) => {
+    for (let i = 0; i < n; i++) {
+      const z = R() * 2 - 1, a = R() * TAU, r = Math.sqrt(1 - z * z);
+      out.push([cx + r * Math.cos(a) * rx, cy + z * ry, cz + r * Math.sin(a) * rz, c || 0, k || 1.25]);
+    }
+  };
+  const seg = (ax, ay, az, bx, by, bz, rad, n, c, k) => {
+    for (let i = 0; i < n; i++) {
+      const t = R();
+      out.push([ax + (bx - ax) * t + (R() - 0.5) * rad, ay + (by - ay) * t + (R() - 0.5) * rad,
+                az + (bz - az) * t + (R() - 0.5) * rad, c || 0, k || 1.2]);
+    }
+  };
+  ell(0, 1.05, 0, 0.26, 0.55, 0.19, 420);                       // thin, too-tall torso
+  ell(0, 1.88, 0.1, 0.16, 0.27, 0.19, 240);                     // long skull, tilted forward
+  for (const sx of [-1, 1]) {
+    ell(sx * 0.085, 1.93, 0.27, 0.035, 0.035, 0.03, 26, 1, 1.8);                 // two white eyes
+    seg(sx * 0.27, 1.55, 0, sx * 0.34, 0.65, 0.7, 0.07, 130);                    // arms that reach for you
+    seg(sx * 0.34, 0.65, 0.7, sx * 0.36, 0.2, 0.95, 0.05, 50);
+    for (const f of [-1, 0, 1]) seg(sx * 0.36, 0.2, 0.95, sx * 0.36 + f * 0.07, 0.02, 1.15, 0.01, 10, 2, 1.4);   // claws
+    seg(sx * 0.1, 0.6, 0, sx * 0.14, 0, 0.12, 0.08, 90);                         // legs
+  }
+  for (let i = 0; i < 12; i++) {                                // a mouth that is too wide
+    const x = -0.11 + i * 0.02;
+    seg(x, 1.78, 0.24, x, 1.71, 0.25, 0.004, 5, 2, 1.5);
+    seg(x, 1.62, 0.23, x, 1.69, 0.24, 0.004, 5, 2, 1.5);
+  }
+  for (let i = 0; i < 10; i++) seg(0, 0.8 + i * 0.1, -0.18, 0, 0.83 + i * 0.1, -0.32, 0.01, 6, 0, 1.3);   // spine spikes
+  return out;
+})();
+
+function stampMonster(m, bt, life, scale) {   // draw the whole creature as dots, turned to face you
+  const h = headPos();
+  const f = Math.atan2(h.x - m.x, h.z - m.z), sn = Math.sin(f), cs = Math.cos(f);
+  const bob = Math.sin(time * 6) * 0.03;
+  for (const p of MONSTER) {
+    const lx = p[0] * scale + (Math.random() - 0.5) * 0.02, lz = p[2] * scale + (Math.random() - 0.5) * 0.02;
+    addPoint(m.x + lx * cs + lz * sn, p[1] * scale + bob + (Math.random() - 0.5) * 0.02, m.z - lx * sn + lz * cs,
+             MCOL[p[3]], p[4], bt, life);
+  }
+}
+
+/* ================= monster ================= */
+let monster = null;
+let state = 'menu';                  // 'menu' | 'play' | 'over'
+let input = 'none';                  // 'none' | 'vr' | 'touch' | 'desk'
+let level = 1;
+const tileOf = (v) => Math.floor(v / T);
+const huntSpeed = () => Math.min(2.7, 1.9 + 0.12 * level);
+const patrolSpeed = () => 1.1 + 0.05 * level;
+const playerSpeed = () => (input === 'vr' ? 2.0 : 2.6);
+
+/* ---- sprint state ---- */
+let stamina = 1, exhausted = false, sprinting = false, sprintToggle = false;
+let crouching = false, crouchToggle = false, lastCrouch = false, eyeCur = EYE, vrDrop = 0, crouchBtnPrev = false;
+let revealT = REVEAL_EVERY, shakeT = 0, flashT = 0;
+let genX = 0, genZ = 0, powered = false, genProg = 0, genNear = false, genMsgT = 0, noPowerAt = -99, radarAcc = 1;
+
+function spawnMonster(i, j) {
+  monster = { x: (i + 0.5) * T, z: (j + 0.5) * T, mode: 'patrol', path: [], searchT: 0, idle: 6, senseT: 0, tiles: 99,
+    los: true, losT: 0, hideT: 0, heard: false };
+}
+
+function monsterHears(px, pz) {      // a scan is loud: head for where it came from
+  if (!monster) return;
+  monster.idle = 0;
+  monster.heard = true; monster.hideT = 0;     // a scan always gets its attention, crouched or not
+  monster.mode = 'hunt';
+  monster.path = bfsPath(tileOf(monster.x), tileOf(monster.z), tileOf(px), tileOf(pz));
+}
+
+function hasLOS(ax, az, bx, bz) {          // can the monster see the player? (no wall tile in between)
+  const dx = bx - ax, dz = bz - az, d = Math.hypot(dx, dz);
+  const n = Math.max(1, Math.ceil(d / 0.15));
+  for (let k = 1; k < n; k++) {
+    const t = k / n;
+    if (isWall(tileOf(ax + dx * t), tileOf(az + dz * t))) return false;
+  }
+  return true;
+}
+
+function updateMonster(dt, px, pz) {
+  const m = monster;
+  if (m.idle > 0) { m.idle -= dt; return; }
+  m.losT -= dt;
+  if (m.losT <= 0) { m.losT = 0.1; m.los = hasLOS(m.x, m.z, px, pz); }
+  // crouched and out of its sight for a second: it stops and waits (until you stand, scan, or it sees you again)
+  if (crouching && !m.los && !m.heard) m.hideT += dt; else m.hideT = 0;
+  if (m.hideT >= CROUCH_FREEZE) return;
+  m.senseT -= dt;
+  if (m.senseT <= 0) {               // every so often: is the player close by (by walking distance)?
+    m.senseT = 0.4;
+    const p = bfsPath(tileOf(m.x), tileOf(m.z), tileOf(px), tileOf(pz));
+    m.tiles = p.length;
+    if (p.length <= SENSE + (sprinting ? SPRINT_SENSE : 0)) { m.mode = 'hunt'; m.path = p; }   // sprinting is noisy
+  }
+  const sameTile = tileOf(m.x) === tileOf(px) && tileOf(m.z) === tileOf(pz);
+  if (sameTile) {                    // in your tile: no more corridors to follow, just close in on you
+    m.mode = 'hunt'; m.path = []; m.heard = false;
+    const dx = px - m.x, dz = pz - m.z, d = Math.hypot(dx, dz), step = Math.min(d, huntSpeed() * dt);
+    if (d > 1e-6) { m.x += dx / d * step; m.z += dz / d * step; }
+    return;
+  }
+  if (m.path.length === 0) {
+    m.heard = false;
+    if (m.mode === 'hunt') { m.mode = 'search'; m.searchT = 2.5; }
+    else if (m.mode === 'search') { m.searchT -= dt; if (m.searchT <= 0) m.mode = 'patrol'; }
+    if (m.mode === 'patrol') {
+      const ci = 1 + 2 * rand((N - 1) / 2), cj = 1 + 2 * rand((N - 1) / 2);
+      m.path = bfsPath(tileOf(m.x), tileOf(m.z), ci, cj);
+    }
+  }
+  const speed = m.mode === 'hunt' ? huntSpeed() : m.mode === 'patrol' ? patrolSpeed() : 0;
+  let move = speed * dt;
+  while (move > 0 && m.path.length) {
+    const tx = (m.path[0][0] + 0.5) * T, tz = (m.path[0][1] + 0.5) * T;
+    const dx = tx - m.x, dz = tz - m.z, d = Math.hypot(dx, dz);
+    if (d <= move) { m.x = tx; m.z = tz; move -= d; m.path.shift(); }
+    else { m.x += dx / d * move; m.z += dz / d * move; move = 0; }
+  }
+}
+
+/* ================= audio ================= */
+let audio = null, beatT = 0;
+function initAudio() {
+  try {
+    if (audio) { audio.ctx.resume(); return; }
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const buf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    let last = 0;
+    for (let i = 0; i < d.length; i++) { last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02; d[i] = last * 3.5; }
+    const src = ctx.createBufferSource();
+    src.buffer = buf; src.loop = true;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 170;
+    const g = ctx.createGain();
+    g.gain.value = 0;
+    const pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+    src.connect(lp);
+    if (pan) { lp.connect(pan); pan.connect(g); } else lp.connect(g);
+    g.connect(ctx.destination);
+    src.start();
+    audio = { ctx, g, pan };
+  } catch (e) { /* audio is optional */ }
+}
+function tone(f0, f1, dur, vol, type) {
+  if (!audio) return;
+  try {
+    const t = audio.ctx.currentTime;
+    const o = audio.ctx.createOscillator(), g = audio.ctx.createGain();
+    o.type = type || 'sine';
+    o.frequency.setValueAtTime(f0, t);
+    o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(audio.ctx.destination);
+    o.start(t); o.stop(t + dur + 0.05);
+  } catch (e) { /* ignore */ }
+}
+function thump(vol) {
+  if (!audio) return;
+  try {
+    const t0 = audio.ctx.currentTime;
+    [0, 0.17].forEach((off, n) => {
+      const o = audio.ctx.createOscillator(), g = audio.ctx.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(75, t0 + off);
+      o.frequency.exponentialRampToValueAtTime(38, t0 + off + 0.14);
+      g.gain.setValueAtTime(0.0001, t0 + off);
+      g.gain.exponentialRampToValueAtTime(vol * (n ? 0.7 : 1), t0 + off + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + off + 0.16);
+      o.connect(g); g.connect(audio.ctx.destination);
+      o.start(t0 + off); o.stop(t0 + off + 0.2);
+    });
+  } catch (e) { /* ignore */ }
+}
+function sting() {                         // the loud reveal sound
+  tone(880, 90, 0.9, 0.5, 'sawtooth');
+  tone(932, 70, 0.9, 0.35, 'square');
+  setTimeout(() => tone(1760, 400, 0.5, 0.2, 'sawtooth'), 40);
+}
+function audioUpdate(dt, closeness, pan) {
+  if (!audio) return;
+  const t = audio.ctx.currentTime;
+  audio.g.gain.setTargetAtTime(closeness * closeness * 0.9, t, 0.1);
+  if (audio.pan) audio.pan.pan.setTargetAtTime(clamp(pan, -1, 1), t, 0.1);
+  if (closeness > 0.05) {
+    beatT -= dt;
+    if (beatT <= 0) {
+      beatT = 1.1 - 0.8 * closeness;
+      thump(0.2 + 0.6 * closeness);
+      if (input === 'vr') for (const st of ctrls) haptic(st, 0.15 + 0.4 * closeness, 40);
+    }
+  }
+}
+
+/* ================= game flow ================= */
+let nextScanAt = 0, lastReady = true, overAt = 0, overKind = '', needPlace = false, placeWait = 0;
+let yaw = 0, pitch = 0, rigBaseY = 0;
+let startX = 0, startZ = 0, faceYaw = 0;
+
+function startLevel(lv) {
+  level = lv;
+  const c = Math.min(5 + lv, 12);
+  const m = genMaze(c);
+  N = m.n; grid = m.g;
+  startTile = [1, 1];
+  const dist = bfsAll(1, 1);
+  let far = 0;
+  for (let j = 1; j < N; j += 2) for (let i = 1; i < N; i += 2) if (dist[j * N + i] > far) { far = dist[j * N + i]; exitTile = [i, j]; }
+  exitX = (exitTile[0] + 0.5) * T; exitZ = (exitTile[1] + 0.5) * T;
+  const cand = [];
+  for (let j = 1; j < N; j += 2) for (let i = 1; i < N; i += 2) {
+    const d = dist[j * N + i];
+    if (d >= far * 0.5 && !(i === exitTile[0] && j === exitTile[1])) cand.push([i, j]);
+  }
+  const mt = cand[rand(cand.length)];
+  spawnMonster(mt[0], mt[1]);
+  const gc = [];                       // the generator sits somewhere in the middle distance, away from the exit and the monster's den
+  for (let j = 1; j < N; j += 2) for (let i = 1; i < N; i += 2) {
+    const d = dist[j * N + i];
+    if (d >= far * 0.35 && d <= far * 0.85 && !(i === exitTile[0] && j === exitTile[1]) && !(i === mt[0] && j === mt[1])) gc.push([i, j]);
+  }
+  const gt = gc.length ? gc[rand(gc.length)] : exitTile;
+  genX = (gt[0] + 0.5) * T; genZ = (gt[1] + 0.5) * T;
+
+  startX = 1.5 * T; startZ = 1.5 * T;
+  faceYaw = grid[1 * N + 2] === 0 ? -Math.PI / 2 : Math.PI;   // face down an open corridor
+  clearPoints();
+  nextScanAt = time + 0.5;
+  lastReady = true;
+  stamina = 1; exhausted = false; sprinting = false; sprintToggle = false;
+  crouching = false; crouchToggle = false; lastCrouch = false; eyeCur = EYE; vrDrop = 0;
+  revealT = REVEAL_EVERY; shakeT = 0; flashT = 0;
+  powered = false; genProg = 0; genNear = false; genMsgT = 0; noPowerAt = -99; radarAcc = 1;
+  state = 'play';
+  yaw = faceYaw; pitch = 0;
+  rig.rotation.y = faceYaw;
+  camera.rotation.x = 0; camera.rotation.z = 0;
+  if (input === 'vr') { needPlace = true; placeWait = 0; }
+  else { rig.position.set(startX, 0, startZ); camera.position.set(0, EYE, 0); }
+  beatT = 0;
+  updateHud();
+  if (input !== 'vr' && level === 1) setTimeout(() => { if (state === 'play') toast('FIND THE GENERATOR (ORANGE ON YOUR SCAN) AND START IT', 5000); }, 6500);
+  refreshUI();
+  if (input === 'vr') {
+    showPanel(['LEVEL ' + level, 'Trigger = scan (it is loud)', 'Stick click = sprint · A/B = crouch', 'Start the generator, find the exit'], 9, false);
+  } else if (level === 1) {
+    toast(input === 'touch'
+      ? 'TAP SCAN TO MAP AROUND YOU. THE MAP STAYS. SPRINT TO RUN. CROUCH TO HIDE'
+      : 'CLICK OR SPACE: SCAN. THE MAP STAYS  ·  SHIFT: SPRINT  ·  C: CROUCH', 6000);
+  }
+}
+
+function placeRig() {                  // VR: slide the play space so your head is at the start tile
+  rig.updateMatrixWorld(true);
+  const h = headPos();
+  rig.position.x += startX - h.x;
+  rig.position.z += startZ - h.z;
+  rig.position.y = rigBaseY;
+  rig.updateMatrixWorld(true);
+}
+
+const _hv = new THREE.Vector3();
+function headPos() { camera.getWorldPosition(_hv); return _hv; }
+
+function doPulse() {
+  if (state !== 'play' || time < nextScanAt) return false;
+  nextScanAt = time + COOLDOWN;
+  const h = headPos();
+  const ox = h.x, oy = h.y, oz = h.z;
+  let sawExit = false, sawMonster = false, sawGen = false, monT = Infinity;
+  for (let i = 0; i < RAYS; i++) {
+    const z = Math.random() * 2 - 1, a = Math.random() * TAU, r = Math.sqrt(1 - z * z);
+    const dx = r * Math.cos(a), dy = z, dz = r * Math.sin(a);
+    if (!castRay(ox, oy, oz, dx, dy, dz, RANGE)) continue;
+    const t = hit.t, k = hit.kind;
+    if (k === K.PILLAR || k === K.EXITFLOOR) sawExit = true;
+    if (k === K.GEN || k === K.GENON) sawGen = true;
+    if (k === K.MON) { sawMonster = true; monT = Math.min(monT, t); continue; }   // drawn below as the whole creature
+    const bright = clamp(1.2 - t / RANGE, 0.3, 1) * KDIM[k];
+    // the maze stays on the map; the monster's dots expire, because it moves
+    addPoint(ox + dx * t, oy + dy * t, oz + dz * t, KCOL[k], bright, time + t / SOUND, k === K.MON ? MON_LIFE : undefined);
+  }
+  if (sawMonster) stampMonster(monster, time + monT / SOUND, MON_LIFE, 1);
+  tone(1300, 380, 0.55, 0.25);
+  if (sawExit) setTimeout(() => tone(1500, 2100, 0.35, 0.2), 450);
+  if (sawMonster) setTimeout(() => tone(220, 110, 0.5, 0.3, 'sawtooth'), 300);
+  if (input === 'vr') for (const st of ctrls) haptic(st, 0.5, 60, true);
+  if (sawGen) setTimeout(() => tone(500, 700, 0.3, 0.2), 500);
+  if (input !== 'vr') {
+    if (sawGen && !powered) toast('GENERATOR SPOTTED', 1800);
+    else if (sawExit) toast(powered ? 'EXIT SPOTTED' : 'EXIT SPOTTED  ·  NO POWER YET', 1800);
+  }
+  monsterHears(ox, oz);
+  updateHud();
+  return true;
+}
+
+function powerOn() {                       // the generator roars to life: loud, and the exit goes live
+  powered = true; genProg = 1; genNear = false;
+  for (let i = 0; i < 360; i++) {          // a green cage of dots around it that stays on your map
+    const a = Math.random() * TAU, y = Math.random() * 1.15;
+    addPoint(genX + Math.cos(a) * 0.52, y, genZ + Math.sin(a) * 0.52, KCOL[K.GENON], 1.2, time, undefined);
+  }
+  tone(300, 900, 0.6, 0.3);
+  setTimeout(() => tone(600, 1200, 0.5, 0.25), 300);
+  if (input === 'vr') {
+    for (const st of ctrls) haptic(st, 1, 200, true);
+    showPanel(['GENERATOR ON', 'The exit is live', 'It heard that'], 6, false);
+  } else toast('GENERATOR ON  ·  THE EXIT IS LIVE  ·  IT HEARD THAT', 4000);
+  monsterHears(genX, genZ);
+  updateHud();
+}
+
+function revealMonster() {                 // every REVEAL_EVERY seconds: it shows itself, no scan needed, no alert
+  const m = monster;
+  if (!m) return;
+  stampMonster(m, time, REVEAL_LIFE, 1);
+  sting();
+  const h = headPos();
+  if (Math.hypot(m.x - h.x, m.z - h.z) < REVEAL_NEAR) {
+    if (input === 'vr') for (const st of ctrls) haptic(st, 1, 220, true);
+    else { flashT = 0.5; shakeT = SHAKE_TIME; }
+  }
+}
+
+function finish(kind) {
+  state = 'over'; overKind = kind; overAt = time;
+  sprinting = false; sprintToggle = false; crouching = false; crouchToggle = false;
+  shakeT = 0; flashT = 0; flashEl.style.opacity = 0; camera.position.x = 0; camera.rotation.z = 0; genBarEl.style.display = 'none';
+  resetTouch();
+  if (kind === 'dead') {
+    stampMonster(monster, time, 60, 1.25); stampMonster(monster, time, 60, 1.25);   // freeze-frame: it fills your view
+    tone(110, 30, 0.9, 0.5, 'sawtooth');
+  } else {
+    tone(660, 1320, 0.6, 0.3);
+    setTimeout(() => tone(990, 1760, 0.6, 0.25), 250);
+  }
+  const title = kind === 'dead' ? 'CAUGHT' : 'ESCAPED';
+  const sub = kind === 'dead' ? 'It found you on level ' + level + '.' : 'Level ' + level + ' complete. The next maze is bigger.';
+  const btn = kind === 'dead' ? 'TRY AGAIN' : 'NEXT LEVEL';
+  document.getElementById('endTitle').textContent = title;
+  document.getElementById('endTitle').className = kind === 'dead' ? 'dead' : 'win';
+  document.getElementById('endSub').textContent = sub;
+  document.getElementById('endBtn').textContent = btn;
+  if (input === 'vr') showPanel([title, kind === 'dead' ? 'It found you.' : 'Level ' + level + ' complete', 'Pull the trigger to continue'], 600, kind === 'dead');
+  refreshUI();
+}
+
+function continueGame() {
+  if (state !== 'over' || time - overAt < 1.0) return;
+  startLevel(overKind === 'win' ? level + 1 : level);
+}
+
+function exitToMenu() {
+  state = 'menu'; input = 'none';
+  dragMode = false; dragging = false;
+  sprinting = false; sprintToggle = false; crouching = false; crouchToggle = false;
+  shakeT = 0; flashT = 0; flashEl.style.opacity = 0; camera.position.x = 0; camera.rotation.z = 0; genBarEl.style.display = 'none';
+  resetTouch();
+  if (document.pointerLockElement) document.exitPointerLock();
+  clearPoints();
+  panel.visible = false;
+  audioUpdate(0, 0, 0);
+  refreshUI();
+}
+
+function onAction() {
+  if (state === 'play') doPulse();
+  else if (state === 'over') continueGame();
+}
+
+/* ================= HUD / overlays ================= */
+const cardEl = document.getElementById('card');
+const endEl = document.getElementById('end');
+const hudEl = document.getElementById('hud');
+const stamEl = document.getElementById('stam');
+const stamBar = document.getElementById('stamBar');
+const dangerEl = document.getElementById('danger');
+const toastEl = document.getElementById('toast');
+const touchUI = document.getElementById('touchUI');
+const scanBtn = document.getElementById('tScan');
+const sprintBtn = document.getElementById('tSprint');
+const crouchBtn = document.getElementById('tCrouch');
+const flashEl = document.getElementById('flash');
+const radarEl = document.getElementById('radar');
+const genBarEl = document.getElementById('genBar');
+const genFillEl = document.getElementById('genFill');
+let toastTimer = 0;
+
+function toast(text, ms) {
+  toastEl.textContent = text;
+  toastEl.style.opacity = 1;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (toastEl.style.opacity = 0), ms || 2200);
+}
+function updateHud() {
+  const ready = time >= nextScanAt;
+  hudEl.textContent = 'LEVEL ' + level + '   ·   ' + (ready ? 'SCAN READY' : 'RECHARGING') + (crouching ? '   ·   CROUCHED' : '') + '   ·   POWER ' + (powered ? 'ON' : 'OFF');
+  scanBtn.classList.toggle('cool', !ready);
+}
+function refreshUI() {
+  const vr = renderer.xr.isPresenting;
+  cardEl.style.display = state === 'menu' && !vr ? 'flex' : 'none';
+  endEl.style.display = state === 'over' && !vr ? 'flex' : 'none';
+  touchUI.style.display = input === 'touch' && state !== 'menu' ? 'block' : 'none';
+  const showHud = state !== 'menu' && !vr && input !== 'none';
+  hudEl.style.display = showHud ? 'block' : 'none';
+  stamEl.style.display = showHud ? 'block' : 'none';
+  radarEl.style.display = showHud ? 'block' : 'none';
+  if (!showHud) genBarEl.style.display = 'none';
+  if (state !== 'play') dangerEl.style.opacity = 0;
+}
+document.getElementById('endBtn').addEventListener('click', continueGame);
+
+/* ---- floating message panel for VR ---- */
+const panelCanvas = document.createElement('canvas');
+panelCanvas.width = 1024; panelCanvas.height = 512;
+const pctx = panelCanvas.getContext('2d');
+const panelTex = new THREE.CanvasTexture(panelCanvas);
+if (THREE.SRGBColorSpace) panelTex.colorSpace = THREE.SRGBColorSpace;
+const panel = new THREE.Mesh(
+  new THREE.PlaneGeometry(1.4, 0.7),
+  new THREE.MeshBasicMaterial({ map: panelTex, transparent: true })
+);
+panel.visible = false;
+scene.add(panel);
+let panelLife = 0, panelPlace = false;
+
+function showPanel(lines, secs, isError) {
+  pctx.clearRect(0, 0, 1024, 512);
+  pctx.fillStyle = 'rgba(0, 12, 18, 0.92)';
+  pctx.fillRect(0, 0, 1024, 512);
+  pctx.strokeStyle = isError ? '#ff5d5d' : '#4cc9f0';
+  pctx.lineWidth = 6;
+  pctx.strokeRect(3, 3, 1018, 506);
+  pctx.fillStyle = isError ? '#ffb3b3' : '#9fe8ff';
+  pctx.textAlign = 'center';
+  lines.forEach((l, i) => {
+    pctx.font = (i === 0 ? 'bold 76px' : '42px') + ' sans-serif';
+    pctx.fillText(l, 512, 130 + i * 100);
+  });
+  panelTex.needsUpdate = true;
+  panel.material.opacity = 1;
+  panel.visible = true;
+  panelLife = secs;
+  panelPlace = true;
+}
+function placePanel() {
+  const h = headPos();
+  camera.getWorldDirection(_dv);
+  let fx = _dv.x, fz = _dv.z;
+  const len = Math.hypot(fx, fz);
+  if (len < 1e-4) { fx = 0; fz = -1; } else { fx /= len; fz /= len; }
+  panel.position.set(h.x + fx * 1.6, h.y, h.z + fz * 1.6);
+  panel.rotation.y = Math.atan2(h.x - panel.position.x, h.z - panel.position.z);
+}
+const _dv = new THREE.Vector3();
+
+/* ================= radar (corner screen on phone / desktop, on your left hand in VR) ================= */
+const radarCtx = radarEl.getContext('2d');
+const radarTex = new THREE.CanvasTexture(radarEl);
+if (THREE.SRGBColorSpace) radarTex.colorSpace = THREE.SRGBColorSpace;
+const radarMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.13, 0.13), new THREE.MeshBasicMaterial({ map: radarTex, transparent: true }));
+radarMesh.position.set(0, 0.05, 0.05);       // sits on the controller, tilted up toward your eyes
+radarMesh.rotation.x = -0.9;
+radarMesh.visible = false;
+
+function radarTarget() { return powered ? [exitX, exitZ, 'EXIT'] : [genX, genZ, 'GENERATOR']; }
+
+function drawRadar() {
+  const c = radarCtx, R = 118;
+  c.clearRect(0, 0, 256, 256);
+  c.fillStyle = 'rgba(0, 14, 20, 0.88)';
+  c.beginPath(); c.arc(128, 128, 124, 0, TAU); c.fill();
+  c.strokeStyle = 'rgba(76, 201, 240, 0.55)'; c.lineWidth = 3;
+  c.beginPath(); c.arc(128, 128, 124, 0, TAU); c.stroke();
+  c.lineWidth = 1.5; c.strokeStyle = 'rgba(76, 201, 240, 0.25)';
+  for (const f of [0.33, 0.66]) { c.beginPath(); c.arc(128, 128, R * f, 0, TAU); c.stroke(); }
+  c.beginPath(); c.moveTo(128, 128 - R); c.lineTo(128, 128 + R); c.moveTo(128 - R, 128); c.lineTo(128 + R, 128); c.stroke();
+  c.fillStyle = '#9fe8ff'; c.beginPath(); c.arc(128, 128, 5, 0, TAU); c.fill();                 // you, facing up
+  const h = headPos(), tg = radarTarget();
+  const dx = tg[0] - h.x, dz = tg[1] - h.z, dist = Math.hypot(dx, dz);
+  const f = heading();
+  const lat = dx * -f[1] + dz * f[0], fwd = dx * f[0] + dz * f[1];
+  const ang = Math.atan2(lat, fwd);                                    // clockwise from straight ahead
+  const sweep = ((time / RADAR_SWEEP) % 1) * TAU;
+  const since = (((sweep - ang) % TAU) + TAU) % TAU;                   // how far the sweep has moved past the blip
+  c.strokeStyle = 'rgba(76, 201, 240, 0.8)'; c.lineWidth = 3;
+  c.beginPath(); c.moveTo(128, 128); c.lineTo(128 + Math.sin(sweep) * R, 128 - Math.cos(sweep) * R); c.stroke();
+  const fade = Math.max(0.15, 1 - since / TAU);                        // the blip lights up when swept, then dims
+  const r = Math.min(dist, RADAR_RANGE) / RADAR_RANGE * R;
+  c.fillStyle = 'rgba(' + (powered ? '255, 214, 10' : '255, 159, 28') + ',' + fade.toFixed(2) + ')';
+  c.beginPath(); c.arc(128 + Math.sin(ang) * r, 128 - Math.cos(ang) * r, 9, 0, TAU); c.fill();
+  c.textAlign = 'center'; c.fillStyle = '#9fe8ff'; c.font = 'bold 30px sans-serif';
+  c.fillText(Math.round(dist) + ' m', 128, 205);
+  c.font = '18px sans-serif'; c.fillStyle = '#6fb7cc';
+  c.fillText(genProg > 0 && !powered ? 'STARTING ' + Math.round(genProg * 100) + '%' : tg[2], 128, 232);
+  radarTex.needsUpdate = true;
+}
+
+/* ================= collisions & movement ================= */
+function pushOut(p) {
+  for (let pass = 0; pass < 2; pass++) {
+    const i0 = tileOf(p.x - PR), i1 = tileOf(p.x + PR), j0 = tileOf(p.z - PR), j1 = tileOf(p.z + PR);
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      if (!isWall(i, j)) continue;
+      const minX = i * T, maxX = minX + T, minZ = j * T, maxZ = minZ + T;
+      const cx = clamp(p.x, minX, maxX), cz = clamp(p.z, minZ, maxZ);
+      const dx = p.x - cx, dz = p.z - cz, d2 = dx * dx + dz * dz;
+      if (d2 >= PR * PR) continue;
+      if (d2 > 1e-9) { const d = Math.sqrt(d2); p.x = cx + dx / d * PR; p.z = cz + dz / d * PR; }
+      else {                                   // centre is inside the tile: push out the nearest side
+        const l = p.x - minX, r = maxX - p.x, t = p.z - minZ, b = maxZ - p.z, m = Math.min(l, r, t, b);
+        if (m === l) p.x = minX - PR; else if (m === r) p.x = maxX + PR;
+        else if (m === t) p.z = minZ - PR; else p.z = maxZ + PR;
+      }
+    }
+  }
+}
+
+function moveHead(dx, dz) {
+  const h = headPos();
+  const hx = h.x, hz = h.z;
+  const p = { x: hx + dx, z: hz + dz };
+  pushOut(p);
+  rig.position.x += p.x - hx;
+  rig.position.z += p.z - hz;
+  rig.updateMatrixWorld(true);
+}
+
+function heading() {                       // horizontal direction you're facing
+  if (renderer.xr.isPresenting) {
+    camera.getWorldDirection(_dv);
+    const len = Math.hypot(_dv.x, _dv.z);
+    if (len > 1e-3) return [_dv.x / len, _dv.z / len];
+  }
+  return [-Math.sin(rig.rotation.y), -Math.cos(rig.rotation.y)];
+}
+
+function stickMove(sx, sy, speed, dt, wantSprint) {    // sy < 0 = forward
+  if (Math.abs(sx) < 0.15) sx = 0;
+  if (Math.abs(sy) < 0.15) sy = 0;
+  if (!sx && !sy) return;
+  const len = Math.min(1, Math.hypot(sx, sy));
+  const mag = Math.hypot(sx, sy);
+  sx = sx / mag * len; sy = sy / mag * len;
+
+  if (crouching) { speed *= CROUCH_SPEED; wantSprint = false; }   // crouched: half speed, no sprinting
+  if (wantSprint && !exhausted && stamina > 0) {       // sprinting only costs stamina while you are actually moving
+    sprinting = true;
+    stamina -= dt / SPRINT_DRAIN;
+    if (stamina <= 0) {
+      stamina = 0; exhausted = true; sprinting = false; sprintToggle = false;
+      tone(190, 110, 0.35, 0.18);
+    }
+  }
+  if (sprinting) speed *= SPRINT_MULT;
+
+  const [fx, fz] = heading();
+  const rx = -fz, rz = fx;
+  moveHead((fx * -sy + rx * sx) * speed * dt, (fz * -sy + rz * sx) * speed * dt);
+}
+
+/* ================= VR controllers ================= */
+const ctrls = [];
+for (let i = 0; i < 2; i++) {
+  const c = renderer.xr.getController(i);
+  const st = { obj: c, source: null, lastHaptic: 0 };
+  st.marker = new THREE.Mesh(new THREE.SphereGeometry(0.012, 8, 6), new THREE.MeshBasicMaterial({ color: 0x14485c }));
+  c.add(st.marker);
+  c.addEventListener('connected', (e) => {
+    st.source = e.data;
+    if (e.data && e.data.handedness === 'left') c.add(radarMesh);       // the radar lives on your left hand
+  });
+  c.addEventListener('disconnected', () => { st.source = null; });
+  c.addEventListener('selectstart', onAction);
+  c.addEventListener('squeezestart', onAction);
+  rig.add(c);
+  ctrls.push(st);
+}
+function haptic(st, intensity, ms, force) {
+  if (!st || !st.source) return;
+  const now = performance.now();
+  if (!force && now - st.lastHaptic < 90) return;
+  st.lastHaptic = now;
+  try { st.source.gamepad && st.source.gamepad.hapticActuators && st.source.gamepad.hapticActuators[0].pulse(intensity, ms); } catch (e) { /* ignore */ }
+}
+
+let snapReady = true;
+function xrInput(dt) {
+  const session = renderer.xr.getSession();
+  if (!session) return;
+  let mx = 0, my = 0, turn = 0, sprintHeld = false, crouchNow = false;
+  for (const src of session.inputSources) {
+    const gp = src.gamepad;
+    if (!gp) continue;
+    const sx = gp.axes[2] || 0, sy = gp.axes[3] || 0;
+    if (src.handedness === 'left') { mx = sx; my = sy; }
+    else if (src.handedness === 'right') { turn = sx; }
+    if (gp.buttons && gp.buttons[3] && gp.buttons[3].pressed) sprintHeld = true;   // thumbstick click, either hand
+    if (gp.buttons && ((gp.buttons[4] && gp.buttons[4].pressed) || (gp.buttons[5] && gp.buttons[5].pressed))) crouchNow = true;   // A/X or B/Y
+  }
+  if (crouchNow && !crouchBtnPrev) {                  // A/X or B/Y toggles crouch
+    crouchToggle = !crouchToggle;
+    if (crouchToggle) sprintToggle = false;
+    for (const st of ctrls) haptic(st, 0.3, 40, true);
+  }
+  crouchBtnPrev = crouchNow;
+  stickMove(mx, my, playerSpeed(), dt, sprintHeld);
+  if (Math.abs(turn) < 0.3) snapReady = true;
+  else if (snapReady && Math.abs(turn) > 0.7) {       // 30 degree snap turn around your head
+    snapReady = false;
+    const ang = -Math.sign(turn) * Math.PI / 6;
+    const h = headPos();
+    const px = rig.position.x - h.x, pz = rig.position.z - h.z;
+    const cs = Math.cos(ang), sn = Math.sin(ang);
+    rig.position.x = h.x + px * cs + pz * sn;
+    rig.position.z = h.z - px * sn + pz * cs;
+    rig.rotation.y += ang;
+    rig.updateMatrixWorld(true);
+  }
+}
+
+/* ================= desktop controls ================= */
+const keys = {};
+let dragMode = false, dragging = false;
+
+function enterDragMode() {                  // fallback when the browser won't let us capture the mouse
+  if (dragMode || input !== 'desk') return;
+  dragMode = true;
+  window.diag('mouse capture is blocked here, using drag mode instead');
+  toast('DRAG OR ARROWS: LOOK  ·  SPACE: SCAN  ·  SHIFT: SPRINT  ·  ESC: MENU', 6000);
+}
+
+window.addEventListener('keydown', (e) => {
+  keys[e.code] = true;
+  if (input === 'none' || input === 'vr') return;
+  if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+  if (e.code === 'Escape' && input === 'desk') { exitToMenu(); return; }
+  if (e.code === 'Space' && !e.repeat) onAction();
+  if (e.code === 'KeyX' && !e.repeat && input === 'desk') crouchToggle = !crouchToggle;   // X toggles crouch
+});
+window.addEventListener('keyup', (e) => { keys[e.code] = false; });
+window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+window.addEventListener('contextmenu', (e) => { if (input !== 'none') e.preventDefault(); });
+window.addEventListener('mousedown', (e) => {
+  if (input !== 'desk' || e.button !== 0) return;
+  if (dragMode) dragging = true;
+  else if (document.pointerLockElement === canvasEl) onAction();
+});
+window.addEventListener('mouseup', () => { dragging = false; });
+window.addEventListener('mousemove', (e) => {
+  if (input !== 'desk') return;
+  if (!(document.pointerLockElement === canvasEl || (dragMode && dragging))) return;
+  yaw -= e.movementX * 0.0022;
+  pitch = clamp(pitch - e.movementY * 0.0022, -1.5, 1.5);
+  rig.rotation.y = yaw;
+  camera.rotation.x = pitch;
+});
+document.addEventListener('pointerlockchange', () => {
+  if (input === 'desk' && !dragMode && document.pointerLockElement !== canvasEl && state !== 'menu') exitToMenu();
+});
+document.addEventListener('pointerlockerror', enterDragMode);
+
+document.getElementById('playDesk').addEventListener('click', () => {
+  initAudio();
+  input = 'desk'; dragMode = false;
+  startLevel(1);
+  try {
+    const r = canvasEl.requestPointerLock();
+    if (r && r.catch) r.catch(enterDragMode);
+  } catch (e) { enterDragMode(); }
+  setTimeout(() => { if (input === 'desk' && document.pointerLockElement !== canvasEl) enterDragMode(); }, 700);
+});
+
+/* ================= touch controls ================= */
+const joyRing = document.getElementById('joyRing');
+const joyKnob = document.getElementById('joyKnob');
+const touchState = { sx: 0, sy: 0 };
+const tid = { joy: null, look: null, scan: null };
+let joyOx = 0, joyOy = 0, lookX = 0, lookY = 0;
+const JOY_R = 60;
+
+function resetTouch() {
+  tid.joy = tid.look = tid.scan = null;
+  touchState.sx = touchState.sy = 0;
+  joyRing.style.display = joyKnob.style.display = 'none';
+}
+
+window.addEventListener('touchstart', (e) => {
+  if (input !== 'touch' || state === 'menu') return;
+  if (state !== 'play') return;                       // game-over screen: let the button work normally
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    const c = t.target && t.target.closest ? t.target.closest('[data-ctl]') : null;
+    if (c) {
+      const k = c.dataset.ctl;
+      if (k === 'scan') { tid.scan = t.identifier; onAction(); }
+      else if (k === 'sprint') { if (!exhausted && !crouchToggle) sprintToggle = !sprintToggle; }
+      else if (k === 'crouch') { crouchToggle = !crouchToggle; if (crouchToggle) sprintToggle = false; }
+      else if (k === 'menu') { exitToMenu(); return; }
+    } else if (t.clientX < window.innerWidth * 0.45) {
+      if (tid.joy === null) {
+        tid.joy = t.identifier; joyOx = t.clientX; joyOy = t.clientY;
+        joyRing.style.left = joyKnob.style.left = joyOx + 'px';
+        joyRing.style.top = joyKnob.style.top = joyOy + 'px';
+        joyRing.style.display = joyKnob.style.display = 'block';
+      }
+    } else if (tid.look === null) {
+      tid.look = t.identifier; lookX = t.clientX; lookY = t.clientY;
+    }
+  }
+}, { passive: false });
+
+window.addEventListener('touchmove', (e) => {
+  if (input !== 'touch' || state !== 'play') return;
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    if (t.identifier === tid.joy) {
+      const dx = clamp(t.clientX - joyOx, -JOY_R, JOY_R), dy = clamp(t.clientY - joyOy, -JOY_R, JOY_R);
+      touchState.sx = dx / JOY_R;
+      touchState.sy = dy / JOY_R;                     // up on screen = negative = forward
+      joyKnob.style.left = (joyOx + dx) + 'px';
+      joyKnob.style.top = (joyOy + dy) + 'px';
+    } else if (t.identifier === tid.look) {
+      yaw -= (t.clientX - lookX) * 0.0045;
+      pitch = clamp(pitch - (t.clientY - lookY) * 0.0045, -1.5, 1.5);
+      lookX = t.clientX; lookY = t.clientY;
+      rig.rotation.y = yaw;
+      camera.rotation.x = pitch;
+    }
+  }
+}, { passive: false });
+
+function touchEnd(e) {
+  if (input !== 'touch') return;
+  for (const t of e.changedTouches) {
+    if (t.identifier === tid.joy) {
+      tid.joy = null; touchState.sx = touchState.sy = 0;
+      joyRing.style.display = joyKnob.style.display = 'none';
+    } else if (t.identifier === tid.look) tid.look = null;
+    else if (t.identifier === tid.scan) tid.scan = null;
+  }
+}
+window.addEventListener('touchend', touchEnd, { passive: true });
+window.addEventListener('touchcancel', touchEnd, { passive: true });
+
+document.getElementById('playTouch').addEventListener('click', () => {
+  initAudio();
+  input = 'touch'; dragMode = false;
+  resetTouch();
+  startLevel(1);
+});
+
+function flatInput(dt) {
+  let x = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
+  let y = (keys.KeyS ? 1 : 0) - (keys.KeyW ? 1 : 0);
+  if (input === 'touch') { x += touchState.sx; y += touchState.sy; }
+  const wantSprint = !!(keys.ShiftLeft || keys.ShiftRight || sprintToggle);
+  stickMove(x, y, playerSpeed(), dt, wantSprint);
+  if (input === 'desk' && dragMode) {                 // arrow keys look around in drag mode
+    yaw += ((keys.ArrowLeft ? 1 : 0) - (keys.ArrowRight ? 1 : 0)) * 1.8 * dt;
+    pitch = clamp(pitch + ((keys.ArrowUp ? 1 : 0) - (keys.ArrowDown ? 1 : 0)) * 1.4 * dt, -1.5, 1.5);
+    rig.rotation.y = yaw;
+    camera.rotation.x = pitch;
+  }
+}
+
+/* ================= Enter VR button (with built-in diagnostics) ================= */
+const enterBtn = document.getElementById('enterVR');
+window.diag('secure context (https): ' + window.isSecureContext + '   WebXR in this browser: ' + ('xr' in navigator));
+if (navigator.xr) {
+  navigator.xr.isSessionSupported('immersive-vr').then((ok) => {
+    window.diag('immersive-vr supported: ' + ok);
+    enterBtn.disabled = !ok;
+    enterBtn.textContent = ok ? 'ENTER VR' : 'VR NOT AVAILABLE HERE';
+    if (!ok) window.diag('VR needs a headset browser (like the Quest browser) opened from an https link.');
+  }).catch((e) => {
+    window.diag('VR support check failed: ' + e.message);
+    enterBtn.textContent = 'VR CHECK FAILED';
+  });
+} else {
+  enterBtn.textContent = 'NO VR IN THIS BROWSER';
+  window.diag('This browser has no WebXR. VR needs a headset browser (like the Quest browser) opened from an https link.');
+}
+
+async function openSession(attempts) {      // try the full-featured request first, then simpler ones
+  let lastErr;
+  for (const init of attempts) {
+    try {
+      const s = await navigator.xr.requestSession('immersive-vr', init);
+      window.diag('session opened with: ' + JSON.stringify(init));
+      return s;
+    } catch (e) {
+      lastErr = e;
+      window.diag('attempt refused (' + JSON.stringify(init) + '): ' + e.name + ': ' + e.message);
+    }
+  }
+  throw lastErr;
+}
+
+enterBtn.addEventListener('click', async () => {
+  window.diag('starting VR session...');
+  try {
+    const session = await openSession([
+      { optionalFeatures: ['local-floor', 'bounded-floor'] },
+      { optionalFeatures: ['local-floor'] },
+      {},
+    ]);
+    try {
+      await session.requestReferenceSpace('local-floor');
+      renderer.xr.setReferenceSpaceType('local-floor');
+      rigBaseY = 0;
+    } catch (e) {
+      window.diag('no floor-level space on this device, using head-level space instead');
+      renderer.xr.setReferenceSpaceType('local');
+      rigBaseY = EYE;
+    }
+    await renderer.xr.setSession(session);
+    window.diag('VR session running');
+  } catch (e) {
+    window.diag('Could not start VR: ' + e.name + ': ' + e.message);
+    window.diag('If this page is inside the Claude app preview or another embedded frame, VR is blocked there. Open it directly from an https link in the Quest browser.');
+  }
+});
+
+renderer.xr.addEventListener('sessionstart', () => {
+  initAudio();
+  if (document.pointerLockElement) document.exitPointerLock();
+  resetTouch();
+  input = 'vr'; dragMode = false;
+  yaw = 0; pitch = 0;
+  if (!radarMesh.parent) ctrls[0].obj.add(radarMesh);     // fallback if no left-hand controller reports in
+  camera.position.set(0, 0, 0);       // in VR the headset supplies the position
+  camera.rotation.set(0, 0, 0);
+  startLevel(1);
+});
+renderer.xr.addEventListener('sessionend', () => {
+  exitToMenu();
+  camera.position.set(0, EYE, 0);
+  camera.quaternion.set(0, 0, 0, 1);
+  rig.position.set(0, 0, 0);
+  rig.rotation.set(0, 0, 0);
+});
+
+/* ================= main loop ================= */
+const clockStart = performance.now();
+let lastT = clockStart;
+let frameError = false;
+
+function update(dt) {
+  time += dt;
+  uniforms.uTime.value = time;
+  const presenting = renderer.xr.isPresenting;
+  rig.updateMatrixWorld(true);
+
+  if (presenting && needPlace && ++placeWait >= 3) { placeRig(); needPlace = false; }
+
+  if (state === 'play' && !needPlace) {
+    sprinting = false;                                  // set again by stickMove if you are sprinting this frame
+    // crouch: hold C / Ctrl on desktop, the CROUCH button on phone, physically crouch in VR
+    if (presenting) crouching = crouchToggle || (headPos().y + vrDrop) < VR_CROUCH_Y;
+    else if (input === 'touch') crouching = crouchToggle;
+    else crouching = !!(keys.KeyC || keys.ControlLeft || keys.ControlRight) || crouchToggle;
+    if (crouching) sprintToggle = false;
+    if (crouching !== lastCrouch) { lastCrouch = crouching; updateHud(); }
+    if (!presenting) {                                   // eye height eases down / up; a close reveal shakes the camera
+      eyeCur += ((crouching ? CROUCH_EYE : EYE) - eyeCur) * Math.min(1, dt * 12);
+      shakeT = Math.max(0, shakeT - dt);
+      const amp = shakeT > 0 ? (shakeT / SHAKE_TIME) * 0.05 : 0;
+      camera.position.x = amp ? (Math.random() * 2 - 1) * amp : 0;
+      camera.position.y = eyeCur + (amp ? (Math.random() * 2 - 1) * amp : 0);
+      camera.rotation.z = amp ? (Math.random() * 2 - 1) * amp * 0.8 : 0;
+    } else {                                             // VR button crouch: the view sinks so it feels like crouching
+      vrDrop += ((crouchToggle ? 0.6 : 0) - vrDrop) * Math.min(1, dt * 10);
+      rig.position.y = rigBaseY - vrDrop;
+    }
+    if (presenting) xrInput(dt); else if (input !== 'none') flatInput(dt);
+    if (!sprinting) {                                   // catch your breath
+      stamina = Math.min(1, stamina + dt / SPRINT_REGEN);
+      if (exhausted && stamina > 0.3) exhausted = false;
+    }
+    stamBar.style.width = (stamina * 100).toFixed(1) + '%';
+    stamEl.classList.toggle('low', exhausted);
+    sprintBtn.classList.toggle('on', sprintToggle);
+    crouchBtn.classList.toggle('on', crouchToggle);
+    rig.updateMatrixWorld(true);
+    const h = headPos();
+    const hx = h.x, hz = h.z;
+    if (monster) {
+      updateMonster(dt, hx, hz);
+      const dx = monster.x - hx, dz = monster.z - hz, d = Math.hypot(dx, dz);
+      const closeness = clamp(1 - d / 14, 0, 1);
+      const [fx, fz] = heading();
+      const pan = d > 1e-3 ? (dx * -fz + dz * fx) / d : 0;
+      audioUpdate(dt, closeness, pan);
+      if (input !== 'vr') dangerEl.style.opacity = String(Math.pow(clamp(1 - d / 9, 0, 1), 1.4) * (0.75 + 0.25 * Math.sin(time * 9)));
+      if (d < CATCH) finish('dead');
+    }
+    if (state === 'play' && Math.hypot(exitX - hx, exitZ - hz) < 0.9) {
+      if (powered) finish('win');
+      else if (time - noPowerAt > 3) {
+        noPowerAt = time;
+        tone(300, 150, 0.4, 0.25, 'square');
+        if (input === 'vr') showPanel(['NO POWER', 'Find the generator first'], 3, true);
+        else toast('THE EXIT HAS NO POWER. FIND THE GENERATOR', 2500);
+      }
+    }
+    if (state === 'play') {
+      revealT -= dt;
+      if (revealT <= 0) { revealT += REVEAL_EVERY; revealMonster(); }
+      flashT = Math.max(0, flashT - dt);
+      flashEl.style.opacity = String(Math.min(1, flashT / 0.5) * 0.7);
+      // the generator: stand next to it to start it (loud: the monster heads for it)
+      if (!powered) {
+        if (Math.hypot(genX - hx, genZ - hz) < GEN_RANGE) {
+          if (!genNear) { genNear = true; monsterHears(genX, genZ); tone(120, 60, 0.6, 0.3, 'sawtooth'); }
+          genProg = Math.min(1, genProg + dt / GEN_TIME);
+          if (input === 'vr') for (const st of ctrls) haptic(st, 0.2 + 0.5 * genProg, 40);
+          genMsgT -= dt;
+          if (genMsgT <= 0) { genMsgT = 0.6; tone(90 + 160 * genProg, 70 + 120 * genProg, 0.45, 0.2, 'sawtooth'); }
+          if (genProg >= 1) powerOn();
+        } else {
+          genNear = false;
+          genProg = Math.max(0, genProg - dt / GEN_TIME * 0.5);
+        }
+      }
+      const showBar = input !== 'vr' && !powered && genProg > 0;
+      genBarEl.style.display = showBar ? 'block' : 'none';
+      if (showBar) genFillEl.style.width = (genProg * 100).toFixed(0) + '%';
+      radarAcc += dt;
+      if (radarAcc >= 0.066) { radarAcc = 0; drawRadar(); }
+    }
+    const ready = time >= nextScanAt;
+    if (ready !== lastReady) { lastReady = ready; updateHud(); }
+    for (const st of ctrls) st.marker.material.color.setHex(ready ? 0x4cc9f0 : 0x14485c);
+  } else if (state !== 'play') {
+    audioUpdate(dt, 0, 0);
+  }
+
+  if (panel.visible) {
+    if (panelPlace && presenting) { panelPlace = false; placePanel(); }
+    panelLife -= dt;
+    if (panelLife < 1) panel.material.opacity = Math.max(panelLife, 0);
+    if (panelLife <= 0) panel.visible = false;
+  }
+  radarMesh.visible = presenting && state === 'play' && radarMesh.parent !== null;
+  flushPoints();
+}
+
+function animate() {
+  const now = performance.now();
+  const dt = Math.min((now - lastT) / 1000, 0.05);
+  lastT = now;
+  try {
+    update(dt);
+    renderer.render(scene, camera);
+  } catch (e) {
+    if (!frameError) {
+      frameError = true;
+      window.diag('Frame error: ' + (e && e.message));
+      showPanel(['SOMETHING BROKE', String(e && e.message).slice(0, 34)], 300, true);
+    }
+    try { renderer.render(scene, camera); } catch (e2) { /* nothing more to do */ }
+  }
+}
+renderer.setAnimationLoop(animate);
+
+// handy for testing from the browser console
+window.__game = {
+  update, doPulse, startLevel, castRay, bfsAll, bfsPath, finish, continueGame, exitToMenu,
+  get state() { return state; }, get level() { return level; }, get monster() { return monster; },
+  get grid() { return grid; }, get N() { return N; }, get exitTile() { return exitTile; },
+  get overKind() { return overKind; }, get hit() { return hit; }, get time() { return time; },
+  get count() { return count; }, get dragMode() { return dragMode; }, get input() { return input; },
+  get stamina() { return stamina; }, get sprinting() { return sprinting; }, get crouching() { return crouching; },
+  hasLOS, revealMonster, stampMonster, MONSTER,
+  get powered() { return powered; }, get gen() { return [genX, genZ]; }, get genProg() { return genProg; }, powerOn, drawRadar,
+  setTime(t) { time = t; }, rig, camera, T, H, RANGE, LIFE, pos, birth, K,
+};
+</script>
+</body>
+</html>
